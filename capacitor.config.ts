@@ -1,8 +1,8 @@
 import { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'io.ionic.starter',
-  appName: 'IceOutApp',
+  appId: 'com.iceout.app',
+  appName: 'IceOut',
   webDir: 'dist',
   server: {
     androidScheme: 'https'

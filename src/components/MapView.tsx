@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo, memo } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Circle, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -65,6 +65,8 @@ interface MapViewProps {
   alertCenter?: [number, number] | null;
   alertRadius?: number;
   onCenterChange?: (lat: number, lng: number) => void;
+  activeAlert?: { center: [number, number], radius: number } | null;
+  showModal?: boolean;
 }
 
 const MapView: React.FC<MapViewProps> = ({
@@ -72,8 +74,47 @@ const MapView: React.FC<MapViewProps> = ({
   isAlertMode = false,
   alertCenter = null,
   alertRadius = 8046, // Default 5 miles
-  onCenterChange
+  onCenterChange,
+  activeAlert = null,
+  showModal = false
 }) => {
+
+  // Memoize circles to prevent re-renders during zoom/pan
+  const tempCircle = useMemo(() => {
+    if (showModal && alertCenter && !activeAlert) {
+      return (
+        <Circle
+          center={alertCenter}
+          radius={alertRadius}
+          pathOptions={{
+            color: '#ff0000',
+            fillColor: '#ff0000',
+            fillOpacity: 0.08,
+            weight: 2
+          }}
+        />
+      );
+    }
+    return null;
+  }, [showModal, alertCenter, alertRadius, activeAlert]);
+
+  const activeCircle = useMemo(() => {
+    if (activeAlert) {
+      return (
+        <Circle
+          center={activeAlert.center}
+          radius={activeAlert.radius}
+          pathOptions={{
+            color: '#ff0000',
+            fillColor: '#ff0000',
+            fillOpacity: 0.08,
+            weight: 2
+          }}
+        />
+      );
+    }
+    return null;
+  }, [activeAlert]);
 
   const getCategoryName = (categoryEnum?: number): string => {
     const categories: { [key: number]: string } = {
@@ -178,30 +219,12 @@ const MapView: React.FC<MapViewProps> = ({
         <LocationPicker onLocationSelect={(latlng) => onCenterChange(latlng.lat, latlng.lng)} />
       )}
 
-      {/* Alert area circle */}
-      {isAlertMode && alertCenter && (
-        <>
-          <Circle
-            center={alertCenter}
-            radius={alertRadius}
-            pathOptions={{
-              color: '#ff4444',
-              fillColor: '#ff4444',
-              fillOpacity: 0.15,
-              weight: 2
-            }}
-          />
-          <Marker position={alertCenter} icon={Icons.critical}>
-            <Popup>
-              <strong>Alert Center</strong><br/>
-              Monitoring radius: {(alertRadius / 1609.34).toFixed(1)} miles
-            </Popup>
-          </Marker>
-        </>
-      )}
+      {/* Alert area circles (memoized to prevent zoom lag) */}
+      {tempCircle}
+      {activeCircle}
 
-      {/* Plot all report markers (hidden in alert mode) */}
-      {!isAlertMode && reports.map((report, index) => {
+      {/* Plot all report markers */}
+      {reports.map((report, index) => {
         // Safety check: ensure valid coordinates exist
         // Handle multiple coordinate formats:
         // 1. Direct properties: report.latitude, report.longitude
@@ -270,4 +293,4 @@ const MapView: React.FC<MapViewProps> = ({
   );
 };
 
-export default MapView;
+export default memo(MapView);

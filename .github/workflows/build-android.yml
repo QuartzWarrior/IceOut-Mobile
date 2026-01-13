@@ -1,0 +1,128 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Fetch all history for git log and git describe
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: 'npm'
+
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: 'gradle'
+
+    - name: Validate Gradle wrapper
+      uses: gradle/wrapper-validation-action@v3
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Build web app
+      run: npm run build
+
+    - name: Sync Capacitor
+      run: npx cap sync android
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x android/gradlew
+
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@v4
+
+    - name: Build debug APK
+      working-directory: ./android
+      run: ./gradlew assembleDebug --no-daemon --stacktrace
+
+    - name: Upload APK artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: iceout-app-debug
+        path: android/app/build/outputs/apk/debug/app-debug.apk
+        retention-days: 30
+
+    - name: Get latest release tag
+      if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+      id: get_latest_release
+      run: |
+        LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+        if [ -z "$LATEST_TAG" ]; then
+          echo "No previous tags found"
+          echo "latest_tag=" >> $GITHUB_OUTPUT
+        else
+          echo "Latest tag: $LATEST_TAG"
+          echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Generate changelog
+      if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+      id: changelog
+      run: |
+        LATEST_TAG="${{ steps.get_latest_release.outputs.latest_tag }}"
+        
+        echo "Generating changelog..."
+        if [ -z "$LATEST_TAG" ]; then
+          # If no previous tag, get all commits
+          COMMITS=$(git log --pretty=format:"- %s (%h)" --no-merges)
+        else
+          # Get commits since last tag
+          COMMITS=$(git log ${LATEST_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges)
+        fi
+        
+        # Create changelog with proper escaping for multiline output
+        {
+          echo 'changelog<<EOF'
+          echo "## Changes in this release"
+          echo ""
+          echo "$COMMITS"
+          echo 'EOF'
+        } >> $GITHUB_OUTPUT
+
+    - name: Get version for beta release
+      if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+      id: version
+      run: |
+        # Generate version based on date and commit
+        VERSION="beta-$(date +'%Y%m%d-%H%M%S')-$(git rev-parse --short HEAD)"
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Generated version: $VERSION"
+
+    - name: Create Beta Release
+      if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.version.outputs.version }}
+        name: Beta Release ${{ steps.version.outputs.version }}
+        body: |
+          # IceOut App Beta Release
+          
+          This is an automated beta release build from the latest commits.
+          
+          ${{ steps.changelog.outputs.changelog }}
+          
+          ## Installation
+          Download the APK file below and install it on your Android device.
+        files: android/app/build/outputs/apk/debug/app-debug.apk
+        prerelease: true
+        draft: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+

@@ -9,9 +9,13 @@
     "preview": "vite preview",
     "test.e2e": "cypress run",
     "test.unit": "vitest",
-    "lint": "eslint"
+    "lint": "eslint",
+    "cap:sync": "cap sync",
+    "cap:android": "cap open android",
+    "build:android": "npm run build && cap sync android && cd android && ./gradlew assembleRelease"
   },
   "dependencies": {
+    "@capacitor/android": "8.0.0",
     "@capacitor/app": "8.0.0",
     "@capacitor/core": "8.0.0",
     "@capacitor/haptics": "8.0.0",

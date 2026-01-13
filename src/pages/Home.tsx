@@ -40,7 +40,27 @@ const urlBase64ToUint8Array = (base64String: string): Uint8Array => {
 
 
 const Home: React.FC = () => {
-  const [reports, setReports] = useState<Report[]>([]);
+  // Load cached reports from localStorage
+  const getCachedReports = (): Report[] => {
+    try {
+      const cached = localStorage.getItem('iceout_reports');
+      return cached ? JSON.parse(cached) : [];
+    } catch {
+      return [];
+    }
+  };
+
+  // Load active alert from localStorage
+  const getCachedAlert = (): { center: [number, number], radius: number } | null => {
+    try {
+      const cached = localStorage.getItem('iceout_active_alert');
+      return cached ? JSON.parse(cached) : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const [reports, setReports] = useState<Report[]>(getCachedReports());
   const [status, setStatus] = useState('Initializing...');
   const [isLoading, setIsLoading] = useState(true);
 
@@ -49,6 +69,9 @@ const Home: React.FC = () => {
   const [alertCenter, setAlertCenter] = useState<[number, number] | null>(null);
   const [alertRadius, setAlertRadius] = useState(8046); // Default 5 miles in meters
   const [isSubscribing, setIsSubscribing] = useState(false);
+  const [isSelectingLocation, setIsSelectingLocation] = useState(false);
+  const [activeAlert, setActiveAlert] = useState<{ center: [number, number], radius: number } | null>(getCachedAlert());
+  const [isAdjustingRadius, setIsAdjustingRadius] = useState(false);
 
   const hasInitialized = useRef(false);
 
@@ -59,8 +82,20 @@ const Home: React.FC = () => {
       hasInitialized.current = true;
 
       try {
-        setStatus('Solving Crypto Challenge...');
-        setIsLoading(true);
+        // Show cached reports immediately if available
+        const cachedReports = getCachedReports();
+        if (cachedReports.length > 0) {
+          setReports(cachedReports);
+          setStatus(`Loaded ${cachedReports.length} cached reports`);
+          // Keep loading state briefly to ensure map initializes properly
+          setTimeout(() => {
+            setIsLoading(false);
+            setStatus('Refreshing...');
+          }, 100);
+        } else {
+          setStatus('Solving Crypto Challenge...');
+          setIsLoading(true);
+        }
 
         await IceOutApi.login();
         
@@ -80,6 +115,9 @@ const Home: React.FC = () => {
           console.log('First report sample:', points[0]);
           console.log('Report keys:', Object.keys(points[0]));
         }
+
+        // Save to localStorage
+        localStorage.setItem('iceout_reports', JSON.stringify(points));
 
         setReports(points);
         setStatus(`Loaded ${points.length} reports`);
@@ -143,7 +181,7 @@ const Home: React.FC = () => {
       console.log('📡 Subscribing to push notifications...');
       const subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) as BufferSource
       });
 
       console.log('✅ Push subscription created:', subscription);
@@ -151,11 +189,15 @@ const Home: React.FC = () => {
       // Send subscription to backend
       await IceOutApi.subscribeToAlerts(subscription, alertCenter, alertRadius);
 
+      // Save the active alert to keep circle visible and persist across reloads
+      const alert = { center: alertCenter, radius: alertRadius };
+      setActiveAlert(alert);
+      localStorage.setItem('iceout_active_alert', JSON.stringify(alert));
+
       setStatus('✅ Alert activated!');
 
       // Show success message
       setTimeout(() => {
-        alert(`Success! You will be notified of any reports within ${(alertRadius / 1609.34).toFixed(1)} miles of this location.`);
         setShowModal(false);
         setAlertCenter(null);
         setStatus('');
@@ -173,6 +215,46 @@ const Home: React.FC = () => {
   const handleOpenModal = () => {
     setShowModal(true);
     setAlertCenter(null); // Reset selection when opening
+    setIsSelectingLocation(false); // Reset selection mode
+  };
+
+  const handleClearActiveAlert = async () => {
+    try {
+      setStatus('Removing alert...');
+
+      // Try to unsubscribe from the server
+      await IceOutApi.unsubscribeFromAlerts();
+
+      // Clear local state and storage
+      setActiveAlert(null);
+      localStorage.removeItem('iceout_active_alert');
+
+      setStatus('✅ Alert removed');
+      setTimeout(() => setStatus(''), 2000);
+    } catch (error) {
+      console.error('Error removing alert:', error);
+      // Still clear locally even if server request fails
+      setActiveAlert(null);
+      localStorage.removeItem('iceout_active_alert');
+      setStatus('⚠️ Alert removed locally');
+      setTimeout(() => setStatus(''), 3000);
+    }
+  };
+
+  const handleStartLocationSelection = () => {
+    setIsSelectingLocation(true);
+    setShowModal(false); // Close modal completely
+  };
+
+  const handleLocationSelected = (lat: number, lng: number) => {
+    setAlertCenter([lat, lng]);
+    setIsSelectingLocation(false);
+    setShowModal(true); // Reopen modal
+  };
+
+  const handleCancelLocationSelection = () => {
+    setIsSelectingLocation(false);
+    setShowModal(true); // Reopen modal without selection
   };
 
   return (
@@ -196,6 +278,35 @@ const Home: React.FC = () => {
               {status}
             </div>
           )}
+
+          {/* Location Selection Banner */}
+          {isSelectingLocation && (
+            <div style={{
+              padding: '12px 20px',
+              background: '#2196f3',
+              color: '#fff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              fontWeight: 500,
+              zIndex: 1000,
+              boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <IonIcon icon={locationOutline} style={{ fontSize: '20px' }} />
+                <span>Selecting an alert location</span>
+              </div>
+              <IonButton
+                fill="clear"
+                size="small"
+                onClick={handleCancelLocationSelection}
+                style={{ margin: 0, padding: 0, minHeight: 'auto' }}
+              >
+                <IonIcon icon={closeOutline} style={{ fontSize: '24px', color: '#fff' }} />
+              </IonButton>
+            </div>
+          )}
+
           <div style={{ flex: 1, position: 'relative' }}>
             {isLoading ? (
               <div style={{
@@ -211,10 +322,12 @@ const Home: React.FC = () => {
             ) : (
               <MapView
                 reports={reports}
-                isAlertMode={showModal}
+                isAlertMode={isSelectingLocation}
                 alertCenter={alertCenter}
                 alertRadius={alertRadius}
-                onCenterChange={(lat, lng) => setAlertCenter([lat, lng])}
+                onCenterChange={handleLocationSelected}
+                activeAlert={activeAlert}
+                showModal={showModal}
               />
             )}
           </div>
@@ -235,6 +348,11 @@ const Home: React.FC = () => {
           onDidDismiss={() => setShowModal(false)}
           initialBreakpoint={0.5}
           breakpoints={[0, 0.5, 0.75]}
+          style={{
+            '--opacity': isAdjustingRadius ? '0.3' : '1',
+            opacity: isAdjustingRadius ? 0.3 : 1,
+            transition: 'opacity 0.2s ease'
+          } as React.CSSProperties}
         >
           <IonHeader>
             <IonToolbar color="danger">
@@ -249,14 +367,49 @@ const Home: React.FC = () => {
 
           <IonContent className="ion-padding">
             <div style={{ padding: '10px 0' }}>
+              {/* Active Alert Banner */}
+              {activeAlert && (
+                <div style={{
+                  background: '#d1ecf1',
+                  border: '1px solid #bee5eb',
+                  borderRadius: '8px',
+                  padding: '15px',
+                  marginBottom: '20px'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <IonText color="primary">
+                        <strong>Active Alert</strong>
+                      </IonText>
+                      <p style={{ margin: '5px 0 0 0', fontSize: '13px', color: '#666' }}>
+                        Monitoring {(activeAlert.radius / 1609.34).toFixed(1)} mi radius
+                      </p>
+                    </div>
+                    <IonButton
+                      size="small"
+                      fill="outline"
+                      color="danger"
+                      onClick={handleClearActiveAlert}
+                    >
+                      Clear Alert
+                    </IonButton>
+                  </div>
+                </div>
+              )}
+
               {/* Instructions */}
-              <div style={{
-                textAlign: 'center',
-                padding: '20px',
-                background: alertCenter ? '#d4edda' : '#fff3cd',
-                borderRadius: '8px',
-                marginBottom: '20px'
-              }}>
+              <div
+                onClick={!alertCenter ? handleStartLocationSelection : undefined}
+                style={{
+                  textAlign: 'center',
+                  padding: '20px',
+                  background: alertCenter ? '#d4edda' : '#fff3cd',
+                  borderRadius: '8px',
+                  marginBottom: '20px',
+                  cursor: !alertCenter ? 'pointer' : 'default',
+                  transition: 'all 0.3s ease'
+                }}
+              >
                 {alertCenter ? (
                   <>
                     <IonIcon icon={locationOutline} style={{ fontSize: '32px', color: '#28a745' }} />
@@ -266,12 +419,21 @@ const Home: React.FC = () => {
                     <p style={{ margin: '5px 0', color: '#666' }}>
                       Lat: {alertCenter[0].toFixed(4)}, Lng: {alertCenter[1].toFixed(4)}
                     </p>
+                    <IonButton
+                      size="small"
+                      fill="outline"
+                      color="primary"
+                      onClick={handleStartLocationSelection}
+                      style={{ marginTop: '10px' }}
+                    >
+                      Change Location
+                    </IonButton>
                   </>
                 ) : (
                   <>
                     <IonIcon icon={locationOutline} style={{ fontSize: '32px', color: '#ffc107' }} />
                     <IonText color="warning">
-                      <h3 style={{ margin: '10px 0' }}>Tap the Map</h3>
+                      <h3 style={{ margin: '10px 0' }}>Tap Here to Select Location</h3>
                     </IonText>
                     <p style={{ margin: '5px 0', color: '#666' }}>
                       Select a center point for your alert area
@@ -298,7 +460,9 @@ const Home: React.FC = () => {
                 max={80467}
                 step={804.67}
                 value={alertRadius}
-                onIonChange={e => setAlertRadius(e.detail.value as number)}
+                onIonInput={e => setAlertRadius(e.detail.value as number)}
+                onIonKnobMoveStart={() => setIsAdjustingRadius(true)}
+                onIonKnobMoveEnd={() => setIsAdjustingRadius(false)}
                 pin={true}
                 ticks={false}
                 snaps={true}

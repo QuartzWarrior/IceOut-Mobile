@@ -39,7 +39,9 @@ export const IceOutApi = {
 
       // Store CSRF token for future requests
       csrfToken = response.data.csrf_token;
-      console.log('CSRF token stored:', csrfToken.substring(0, 10) + '...');
+      if (csrfToken) {
+        console.log('CSRF token stored:', csrfToken.substring(0, 10) + '...');
+      }
 
       return;
     }
@@ -102,7 +104,9 @@ export const IceOutApi = {
       // Extract CSRF token if available
       if (submitResponse.data && submitResponse.data.csrf_token) {
         csrfToken = submitResponse.data.csrf_token;
-        console.log('CSRF token stored:', csrfToken.substring(0, 10) + '...');
+        if (csrfToken) {
+          console.log('CSRF token stored:', csrfToken.substring(0, 10) + '...');
+        }
       }
     } catch (error: any) {
       console.error('Submit failed:', error);
@@ -191,6 +195,66 @@ export const IceOutApi = {
       console.error('❌ Subscription failed:', error);
       console.error('Error details:', error.response?.data);
       throw new Error(error.response?.data?.message || 'Failed to subscribe to alerts');
+    }
+  },
+
+  /**
+   * Unsubscribe from all push notifications by sending empty alerts array
+   * @param subscription - PushSubscription object from browser (if available)
+   */
+  async unsubscribeFromAlerts(subscription?: PushSubscription) {
+    console.log('📡 Unsubscribing from push notifications...');
+
+    // If no subscription provided, try to get the active one
+    if (!subscription && 'serviceWorker' in navigator) {
+      try {
+        const registration = await navigator.serviceWorker.ready;
+        const existingSubscription = await registration.pushManager.getSubscription();
+        if (existingSubscription) {
+          subscription = existingSubscription;
+        }
+      } catch (error) {
+        console.warn('Could not retrieve push subscription:', error);
+      }
+    }
+
+    if (!subscription) {
+      console.log('⚠️ No subscription found, clearing local alert only');
+      return;
+    }
+
+    // Convert subscription to JSON format
+    const subJson = subscription.toJSON();
+
+    // Build payload with empty alerts array to remove all alerts
+    const payload = {
+      push_subscription: {
+        endpoint: subJson.endpoint,
+        expirationTime: subJson.expirationTime || null,
+        keys: {
+          p256dh: subJson.keys?.p256dh,
+          auth: subJson.keys?.auth
+        }
+      },
+      alerts: [] // Empty array removes all alerts for this subscription
+    };
+
+    console.log('Unsubscribe payload:', JSON.stringify(payload, null, 2));
+
+    // Configure request with CSRF token
+    const config: any = { headers: {} };
+    if (csrfToken) {
+      config.headers['X-CSRFToken'] = csrfToken;
+    }
+
+    try {
+      const response = await api.post('/api/push-notifications-write/', payload, config);
+      console.log('✅ Unsubscribe successful!', response.data);
+      return response.data;
+    } catch (error: any) {
+      console.error('❌ Unsubscribe failed:', error);
+      console.error('Error details:', error.response?.data);
+      throw new Error(error.response?.data?.message || 'Failed to unsubscribe from alerts');
     }
   }
 };
