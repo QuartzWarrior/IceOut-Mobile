@@ -128,5 +128,71 @@ export const IceOutApi = {
     });
 
     return decode(new Uint8Array(response.data));
+  },
+
+  /**
+   * Subscribe to push notifications for alerts in a specific area
+   * @param subscription - PushSubscription object from browser
+   * @param center - [latitude, longitude] center of the alert area
+   * @param radiusMeters - Radius in meters to monitor
+   */
+  async subscribeToAlerts(subscription: PushSubscription, center: [number, number], radiusMeters: number) {
+    console.log('📡 Subscribing to push notifications...');
+    console.log('Alert area center:', center);
+    console.log('Alert radius:', radiusMeters, 'meters');
+
+    // Convert subscription to JSON format
+    const subJson = subscription.toJSON();
+
+    // Generate unique ID for this alert rule
+    const alertId = crypto.randomUUID();
+    console.log('Alert ID:', alertId);
+
+    // Build payload matching the backend API format
+    const payload = {
+      push_subscription: {
+        endpoint: subJson.endpoint,
+        expirationTime: subJson.expirationTime || null,
+        keys: {
+          p256dh: subJson.keys?.p256dh,
+          auth: subJson.keys?.auth
+        }
+      },
+      alerts: [
+        {
+          id: alertId,
+          radius: radiusMeters,
+          location: {
+            type: "Point",
+            // GeoJSON format: [longitude, latitude] - flip from Leaflet's [lat, lng]
+            coordinates: [center[1], center[0]]
+          },
+          filter_fields: {
+            confirmed_only: false,
+            categories: [0, 1, 2, 3, 4] // All categories
+          }
+        }
+      ]
+    };
+
+    console.log('Subscription payload:', JSON.stringify(payload, null, 2));
+
+    // Configure request with CSRF token
+    const config: any = { headers: {} };
+    if (csrfToken) {
+      config.headers['X-CSRFToken'] = csrfToken;
+    }
+
+    try {
+      const response = await api.post('/api/push-notifications-write/', payload, config);
+      console.log('✅ Subscription successful!', response.data);
+      return response.data;
+    } catch (error: any) {
+      console.error('❌ Subscription failed:', error);
+      console.error('Error details:', error.response?.data);
+      throw new Error(error.response?.data?.message || 'Failed to subscribe to alerts');
+    }
   }
 };
+
+

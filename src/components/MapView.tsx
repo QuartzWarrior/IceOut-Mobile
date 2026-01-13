@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Circle, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import type { Report } from '../types/Report';
+
 
 // --- 1. Define Custom Icons ---
 // Using colored markers from leaflet-color-markers repository
@@ -40,12 +42,38 @@ function UserLocationMarker() {
   );
 }
 
+// --- 2.5. Location Picker for Alert Mode ---
+interface LocationPickerProps {
+  onLocationSelect: (latlng: L.LatLng) => void;
+}
+
+function LocationPicker({ onLocationSelect }: LocationPickerProps) {
+  useMapEvents({
+    click(e) {
+      onLocationSelect(e.latlng);
+    },
+  });
+  return null;
+}
+
+
 // --- 3. The Main Map Component ---
 interface MapViewProps {
   reports: Report[];
+  // Alert mode props
+  isAlertMode?: boolean;
+  alertCenter?: [number, number] | null;
+  alertRadius?: number;
+  onCenterChange?: (lat: number, lng: number) => void;
 }
 
-const MapView: React.FC<MapViewProps> = ({ reports }) => {
+const MapView: React.FC<MapViewProps> = ({
+  reports,
+  isAlertMode = false,
+  alertCenter = null,
+  alertRadius = 8046, // Default 5 miles
+  onCenterChange
+}) => {
 
   const getCategoryName = (categoryEnum?: number): string => {
     const categories: { [key: number]: string } = {
@@ -145,8 +173,35 @@ const MapView: React.FC<MapViewProps> = ({ reports }) => {
       {/* User's location marker */}
       <UserLocationMarker />
 
-      {/* Plot all report markers */}
-      {reports.map((report, index) => {
+      {/* Location picker for alert mode */}
+      {isAlertMode && onCenterChange && (
+        <LocationPicker onLocationSelect={(latlng) => onCenterChange(latlng.lat, latlng.lng)} />
+      )}
+
+      {/* Alert area circle */}
+      {isAlertMode && alertCenter && (
+        <>
+          <Circle
+            center={alertCenter}
+            radius={alertRadius}
+            pathOptions={{
+              color: '#ff4444',
+              fillColor: '#ff4444',
+              fillOpacity: 0.15,
+              weight: 2
+            }}
+          />
+          <Marker position={alertCenter} icon={Icons.critical}>
+            <Popup>
+              <strong>Alert Center</strong><br/>
+              Monitoring radius: {(alertRadius / 1609.34).toFixed(1)} miles
+            </Popup>
+          </Marker>
+        </>
+      )}
+
+      {/* Plot all report markers (hidden in alert mode) */}
+      {!isAlertMode && reports.map((report, index) => {
         // Safety check: ensure valid coordinates exist
         // Handle multiple coordinate formats:
         // 1. Direct properties: report.latitude, report.longitude
