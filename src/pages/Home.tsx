@@ -19,24 +19,14 @@ import {
 import { notificationsOutline, closeOutline, locationOutline } from 'ionicons/icons';
 import { useEffect, useState, useRef } from 'react';
 import { IceOutApi } from '../services/IceOutApi';
+import { NotificationService } from '../services/NotificationService';
+import { Capacitor } from '@capacitor/core';
 import MapView from '../components/MapView';
 import type { Report, ApiResponse } from '../types/Report';
 import './Home.css';
 
 // VAPID Public Key for push notifications (from IceOut API)
 const VAPID_PUBLIC_KEY = 'BCgSBCOqpPadCbc7Oxg0v3qHJsOHLmA2RL3PnxH8gTDPYCxhK-hH6MkZqYJdh-yRajubKBBvppjPXwwadMsTKXU';
-
-// Helper function to convert VAPID key to Uint8Array format for browser
-const urlBase64ToUint8Array = (base64String: string): Uint8Array => {
-  const padding = '='.repeat((4 - base64String.length % 4) % 4);
-  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-  const rawData = window.atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-  for (let i = 0; i < rawData.length; ++i) {
-    outputArray[i] = rawData.charCodeAt(i);
-  }
-  return outputArray;
-};
 
 
 const Home: React.FC = () => {
@@ -145,33 +135,20 @@ const Home: React.FC = () => {
     setStatus('Setting up notifications...');
 
     try {
-      // Check if service workers are supported
-      if (!('serviceWorker' in navigator)) {
-        throw new Error('Service Workers are not supported in this browser');
+      if (!NotificationService.isSupported()) {
+        throw new Error('Push notifications are not supported on this device');
       }
 
-      if (!('PushManager' in window)) {
-        throw new Error('Push notifications are not supported in this browser');
-      }
+      console.log('📱 Initializing notification service...');
 
-      console.log('📱 Registering service worker...');
-
-      // Register service worker
-      const registration = await navigator.serviceWorker.register('/sw.js', {
-        scope: '/'
-      });
-
-      console.log('✅ Service worker registered:', registration);
-
-      // Wait for service worker to be ready
-      await navigator.serviceWorker.ready;
+      await NotificationService.initialize();
 
       console.log('🔔 Requesting notification permission...');
 
       // Request notification permission
-      const permission = await Notification.requestPermission();
+      const granted = await NotificationService.requestPermission();
 
-      if (permission !== 'granted') {
+      if (!granted) {
         throw new Error('Notification permission denied');
       }
 
@@ -179,12 +156,43 @@ const Home: React.FC = () => {
 
       // Subscribe to push notifications
       console.log('📡 Subscribing to push notifications...');
-      const subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) as BufferSource
-      });
 
-      console.log('✅ Push subscription created:', subscription);
+      let subscription: PushSubscription | null = null;
+
+      if (!Capacitor.isNativePlatform()) {
+        subscription = await NotificationService.subscribe(VAPID_PUBLIC_KEY);
+        if (!subscription) {
+          throw new Error('Failed to create push subscription');
+        }
+        console.log('✅ Push subscription created:', subscription);
+      } else {
+        console.log('✅ Native push notifications registered');
+
+        const fcmToken = NotificationService.getFCMToken();
+
+        if (!fcmToken) {
+          throw new Error('Failed to get FCM token. Please ensure notifications are properly registered.');
+        }
+
+        console.log('📱 Using FCM token:', fcmToken.substring(0, 20) + '...');
+
+        subscription = {
+          endpoint: `fcm://${fcmToken}`,
+          expirationTime: null,
+          keys: {
+            p256dh: 'fcm-native',
+            auth: 'fcm-native'
+          },
+          toJSON: () => ({
+            endpoint: `fcm://${fcmToken}`,
+            expirationTime: null,
+            keys: {
+              p256dh: 'fcm-native',
+              auth: 'fcm-native'
+            }
+          })
+        } as unknown as PushSubscription;
+      }
 
       // Send subscription to backend
       await IceOutApi.subscribeToAlerts(subscription, alertCenter, alertRadius);
@@ -203,10 +211,11 @@ const Home: React.FC = () => {
         setStatus('');
       }, 1000);
 
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ Subscription error:', error);
       setStatus('❌ Failed to activate alert');
-      alert('Failed to set up notifications: ' + error.message);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      alert('Failed to set up notifications: ' + errorMessage);
     } finally {
       setIsSubscribing(false);
     }

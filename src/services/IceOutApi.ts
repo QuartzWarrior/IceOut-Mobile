@@ -1,25 +1,59 @@
-import axios from 'axios';
+import axios, { AxiosRequestConfig, AxiosHeaders } from 'axios';
 import { decode } from '@msgpack/msgpack';
 import { solveChallenge } from 'altcha-lib';
+import { Capacitor } from '@capacitor/core';
 
-const api = axios.create({
-  baseURL: '',
-  withCredentials: true,
-  headers: {
-    'x-api-version': '1.3',
-    'Content-Type': 'application/json'
+const getBaseURL = () => {
+  if (Capacitor.isNativePlatform()) {
+    return 'https://iceout.org';
   }
-});
+  return '';
+};
 
 // Store CSRF token for subsequent requests
 let csrfToken: string | null = null;
 
-api.interceptors.request.use((config) => {
-  if (csrfToken) {
-    config.headers['X-CSRFToken'] = csrfToken;
+const createApiInstance = () => {
+  const config: AxiosRequestConfig = {
+    baseURL: getBaseURL(),
+    timeout: 30000,
+  };
+
+  if (!Capacitor.isNativePlatform()) {
+    config.withCredentials = true;
   }
-  return config;
-});
+
+  const instance = axios.create(config);
+
+  instance.interceptors.request.use(
+    (requestConfig) => {
+      if (!requestConfig.headers) {
+        requestConfig.headers = new AxiosHeaders();
+      }
+
+      requestConfig.headers['x-api-version'] = '1.3';
+
+      if (Capacitor.isNativePlatform()) {
+        requestConfig.headers['Origin'] = 'https://iceout.org';
+        requestConfig.headers['Referer'] = 'https://iceout.org/en/';
+        requestConfig.headers['User-Agent'] = 'IceOutApp/1.0 (Android)';
+      }
+
+      if (csrfToken) {
+        requestConfig.headers['X-CSRFToken'] = csrfToken;
+      }
+
+      return requestConfig;
+    },
+    (error) => {
+      return Promise.reject(error);
+    }
+  );
+
+  return instance;
+};
+
+const api = createApiInstance();
 
 export const IceOutApi = {
 
@@ -108,9 +142,11 @@ export const IceOutApi = {
           console.log('CSRF token stored:', csrfToken.substring(0, 10) + '...');
         }
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Submit failed:', error);
-      console.error('Error response:', error.response?.data);
+      if (axios.isAxiosError(error)) {
+        console.error('Error response:', error.response?.data);
+      }
       throw error;
     }
   },
@@ -127,8 +163,10 @@ export const IceOutApi = {
         incident_time__gte: yesterday.toISOString(),
         incident_time__lte: now.toISOString()
       },
-      headers: { 'Accept': 'application/msgpack' },
-      responseType: 'arraybuffer' 
+      headers: {
+        'Accept': 'application/msgpack'
+      },
+      responseType: 'arraybuffer'
     });
 
     return decode(new Uint8Array(response.data));
@@ -181,20 +219,21 @@ export const IceOutApi = {
 
     console.log('Subscription payload:', JSON.stringify(payload, null, 2));
 
-    // Configure request with CSRF token
-    const config: any = { headers: {} };
-    if (csrfToken) {
-      config.headers['X-CSRFToken'] = csrfToken;
-    }
-
     try {
-      const response = await api.post('/api/push-notifications-write/', payload, config);
+      const response = await api.post('/api/push-notifications-write/', payload, {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
       console.log('✅ Subscription successful!', response.data);
       return response.data;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ Subscription failed:', error);
-      console.error('Error details:', error.response?.data);
-      throw new Error(error.response?.data?.message || 'Failed to subscribe to alerts');
+      if (axios.isAxiosError(error)) {
+        console.error('Error details:', error.response?.data);
+        throw new Error(error.response?.data?.message || 'Failed to subscribe to alerts');
+      }
+      throw new Error('Failed to subscribe to alerts');
     }
   },
 
@@ -241,20 +280,21 @@ export const IceOutApi = {
 
     console.log('Unsubscribe payload:', JSON.stringify(payload, null, 2));
 
-    // Configure request with CSRF token
-    const config: any = { headers: {} };
-    if (csrfToken) {
-      config.headers['X-CSRFToken'] = csrfToken;
-    }
-
     try {
-      const response = await api.post('/api/push-notifications-write/', payload, config);
+      const response = await api.post('/api/push-notifications-write/', payload, {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
       console.log('✅ Unsubscribe successful!', response.data);
       return response.data;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ Unsubscribe failed:', error);
-      console.error('Error details:', error.response?.data);
-      throw new Error(error.response?.data?.message || 'Failed to unsubscribe from alerts');
+      if (axios.isAxiosError(error)) {
+        console.error('Error details:', error.response?.data);
+        throw new Error(error.response?.data?.message || 'Failed to unsubscribe from alerts');
+      }
+      throw new Error('Failed to unsubscribe from alerts');
     }
   }
 };

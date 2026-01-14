@@ -5,13 +5,26 @@ const config: CapacitorConfig = {
   appName: 'IceOut',
   webDir: 'dist',
   server: {
-    androidScheme: 'https'
+    androidScheme: 'https',
+    cleartext: true,
+    allowNavigation: [
+      'https://iceout.org',
+      'https://*.tile.openstreetmap.org'
+    ]
   },
   plugins: {
     CapacitorHttp: {
       enabled: true,
     },
+    PushNotifications: {
+      presentationOptions: ['badge', 'sound', 'alert']
+    }
   },
+  android: {
+    allowMixedContent: true,
+    captureInput: true,
+    webContentsDebuggingEnabled: true
+  }
 };
 
 export default config;

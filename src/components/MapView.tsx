@@ -2,6 +2,8 @@ import { useEffect, useState, useMemo, memo } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Circle, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { Geolocation } from '@capacitor/geolocation';
+import { Capacitor } from '@capacitor/core';
 import type { Report } from '../types/Report';
 
 
@@ -29,10 +31,50 @@ function UserLocationMarker() {
   const map = useMap();
 
   useEffect(() => {
-    map.locate().on('locationfound', function (e) {
-      setPosition(e.latlng);
-      map.flyTo(e.latlng, map.getZoom());
-    });
+    const getCurrentLocation = async () => {
+      try {
+        if (Capacitor.isNativePlatform()) {
+          console.log('Getting location on native platform...');
+
+          const permission = await Geolocation.checkPermissions();
+          console.log('Location permission status:', permission);
+
+          if (permission.location !== 'granted') {
+            const requestResult = await Geolocation.requestPermissions();
+            if (requestResult.location !== 'granted') {
+              console.warn('Location permission denied');
+              return;
+            }
+          }
+
+          const coordinates = await Geolocation.getCurrentPosition({
+            enableHighAccuracy: false,
+            timeout: 10000,
+            maximumAge: 300000
+          });
+
+          const latlng: L.LatLngExpression = [
+            coordinates.coords.latitude,
+            coordinates.coords.longitude
+          ];
+          setPosition(latlng);
+          map.flyTo(latlng, map.getZoom());
+          console.log('Location found:', latlng);
+        } else {
+
+          map.locate({ timeout: 10000, maximumAge: 300000 }).on('locationfound', function (e) {
+            setPosition(e.latlng);
+            map.flyTo(e.latlng, map.getZoom());
+          }).on('locationerror', function (e) {
+            console.warn('Could not get user location:', e.message);
+          });
+        }
+      } catch (error) {
+        console.warn('Could not get user location:', error);
+      }
+    };
+
+    getCurrentLocation();
   }, [map]);
 
   return position === null ? null : (
@@ -205,10 +247,13 @@ const MapView: React.FC<MapViewProps> = ({
       style={{ height: '100%', width: '100%', zIndex: 1 }}
       scrollWheelZoom={true}
     >
-      {/* OpenStreetMap Tiles */}
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        crossOrigin={true}
+        maxZoom={19}
+        minZoom={3}
+        errorTileUrl=""
       />
 
       {/* User's location marker */}
