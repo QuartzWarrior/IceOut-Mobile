@@ -39,6 +39,7 @@ android/.idea
 android/local.properties
 android/*.iml
 android/.cxx
+android/gradle.properties.local
 
 # iOS (for future)
 ios/App/build
@@ -49,3 +50,6 @@ ios/App/Podfile.lock
 *.keystore
 *.jks
 
+# firebase config
+android/app/google-services.json
+ios/GoogleService-Info.plist

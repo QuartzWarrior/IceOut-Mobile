@@ -42,6 +42,13 @@ jobs:
     - name: Build web app
       run: npm run build
 
+    - name: Create google-services.json from secret
+      env:
+        GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+      run: |
+        echo "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
+        echo "✅ google-services.json created successfully"
+
     - name: Sync Capacitor
       run: npx cap sync android
 

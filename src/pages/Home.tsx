@@ -66,6 +66,21 @@ const Home: React.FC = () => {
   const hasInitialized = useRef(false);
 
   useEffect(() => {
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      console.error('Unhandled promise rejection:', event.reason);
+      event.preventDefault();
+      setStatus('❌ Error: ' + (event.reason?.message || 'Unknown error'));
+      setIsSubscribing(false);
+    };
+
+    window.addEventListener('unhandledrejection', handleUnhandledRejection);
+
+    return () => {
+      window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+    };
+  }, []);
+
+  useEffect(() => {
     const init = async () => {
       // If we already started, STOP immediately.
       if (hasInitialized.current) return;
@@ -127,7 +142,7 @@ const Home: React.FC = () => {
 
   const handleSubscribe = async () => {
     if (!alertCenter) {
-      alert('Please tap the map to select a location to monitor.');
+      window.alert('Please tap the map to select a location to monitor.');
       return;
     }
 
@@ -144,6 +159,7 @@ const Home: React.FC = () => {
       await NotificationService.initialize();
 
       console.log('🔔 Requesting notification permission...');
+      setStatus('Requesting permission...');
 
       // Request notification permission
       const granted = await NotificationService.requestPermission();
@@ -153,9 +169,11 @@ const Home: React.FC = () => {
       }
 
       console.log('✅ Notification permission granted');
+      setStatus('Permission granted! Setting up...');
 
       // Subscribe to push notifications
       console.log('📡 Subscribing to push notifications...');
+      setStatus('Registering device...');
 
       let subscription: PushSubscription | null = null;
 
@@ -167,67 +185,131 @@ const Home: React.FC = () => {
         console.log('✅ Push subscription created:', subscription);
       } else {
         console.log('✅ Native push notifications registered');
+        setStatus('Waiting for device token...');
 
         const fcmToken = NotificationService.getFCMToken();
 
         if (!fcmToken) {
-          throw new Error('Failed to get FCM token. Please ensure notifications are properly registered.');
-        }
+          console.warn('⚠️ No FCM token available - using dummy subscription for backend only');
+          setStatus('FCM unavailable - creating backend-only subscription...');
 
-        console.log('📱 Using FCM token:', fcmToken.substring(0, 20) + '...');
+          subscription = NotificationService.createDummySubscription();
+          console.log('📝 Created dummy subscription:', subscription.endpoint);
+        } else {
+          console.log('📱 Using FCM token:', fcmToken.substring(0, 20) + '...');
+          setStatus('Device token received!');
 
-        subscription = {
-          endpoint: `fcm://${fcmToken}`,
-          expirationTime: null,
-          keys: {
-            p256dh: 'fcm-native',
-            auth: 'fcm-native'
-          },
-          toJSON: () => ({
+          subscription = {
             endpoint: `fcm://${fcmToken}`,
             expirationTime: null,
             keys: {
               p256dh: 'fcm-native',
               auth: 'fcm-native'
-            }
-          })
-        } as unknown as PushSubscription;
+            },
+            toJSON: () => ({
+              endpoint: `fcm://${fcmToken}`,
+              expirationTime: null,
+              keys: {
+                p256dh: 'fcm-native',
+                auth: 'fcm-native'
+              }
+            })
+          } as unknown as PushSubscription;
+        }
       }
 
       // Send subscription to backend
-      await IceOutApi.subscribeToAlerts(subscription, alertCenter, alertRadius);
+      console.log('📤 Sending subscription to backend...');
+      setStatus('Connecting to server...');
+      try {
+        await IceOutApi.subscribeToAlerts(subscription, alertCenter, alertRadius);
+        console.log('✅ Backend subscription successful');
+        setStatus('Server registered!');
+      } catch (apiError) {
+        console.error('❌ Backend subscription failed:', apiError);
+        throw apiError;
+      }
 
       // Save the active alert to keep circle visible and persist across reloads
-      const alert = { center: alertCenter, radius: alertRadius };
-      setActiveAlert(alert);
-      localStorage.setItem('iceout_active_alert', JSON.stringify(alert));
+      console.log('💾 Saving alert to localStorage...');
+      const alertData = { center: alertCenter, radius: alertRadius };
+      setActiveAlert(alertData);
 
-      setStatus('✅ Alert activated!');
+      try {
+        localStorage.setItem('iceout_active_alert', JSON.stringify(alertData));
+        console.log('✅ Alert saved to localStorage');
+      } catch (storageError) {
+        console.error('⚠️ Failed to save to localStorage:', storageError);
+      }
 
-      setTimeout(() => {
-        setShowModal(false);
-        setAlertCenter(null);
-        setIsSubscribing(false);
-        setTimeout(() => setStatus(''), 500);
-      }, 1500);
+      const isDummySubscription = subscription.endpoint.startsWith('dummy://');
+
+      if (isDummySubscription) {
+        setStatus('⚠️ Alert registered (push notifications unavailable)');
+        console.log('⚠️ Alert registered in backend, but push notifications will not arrive without Firebase');
+      } else {
+        setStatus('✅ Alert activated!');
+      }
+
+      console.log('🎉 Subscription process complete!');
+
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          console.log('Closing modal...');
+          setShowModal(false);
+          setAlertCenter(null);
+          setIsSubscribing(false);
+
+          if (isDummySubscription) {
+            setTimeout(() => {
+              window.alert('✅ Alert registered in backend!\n\n⚠️ Note: Push notifications are disabled without Firebase.\nThe alert circle will be visible on the map, but you won\'t receive actual push notifications.\n\nTo enable notifications, set up Firebase (see FIREBASE_REQUIRED.md)');
+              setStatus('');
+            }, 500);
+          } else {
+            setTimeout(() => setStatus(''), 500);
+          }
+        }, 1500);
+      });
 
     } catch (error: unknown) {
       console.error('❌ Subscription error:', error);
+      console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       setStatus('❌ Failed: ' + errorMessage);
       setIsSubscribing(false);
-
-      setTimeout(() => {
-        alert('Failed to set up notifications: ' + errorMessage);
-        setStatus('');
-      }, 500);
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          window.alert('Failed to set up notifications: ' + errorMessage);
+          setStatus('');
+        }, 500);
+      });
     }
   };
 
   const handleOpenModal = () => {
+    console.log('Opening modal...');
     setShowModal(true);
     setAlertCenter(null); // Reset selection when opening
     setIsSelectingLocation(false); // Reset selection mode
+  };
+
+  const handleCloseModal = () => {
+    console.log('Modal dismissed, isSelectingLocation:', isSelectingLocation);
+    if (!isSelectingLocation) {
+      console.log('Fully closing modal and resetting states');
+      setShowModal(false);
+      setAlertCenter(null);
+    } else {
+      console.log('Modal hidden temporarily for location selection');
+    }
+  };
+
+  const handleExplicitClose = () => {
+    console.log('User explicitly closed modal');
+    setShowModal(false);
+    setAlertCenter(null);
+    setIsSelectingLocation(false);
   };
 
   const handleClearActiveAlert = async () => {
@@ -357,7 +439,7 @@ const Home: React.FC = () => {
         {/* Alert Setup Modal */}
         <IonModal
           isOpen={showModal}
-          onDidDismiss={() => setShowModal(false)}
+          onDidDismiss={handleCloseModal}
           initialBreakpoint={0.5}
           breakpoints={[0, 0.5, 0.75, 1.0]}
           style={{
@@ -370,7 +452,7 @@ const Home: React.FC = () => {
             <IonToolbar color="danger">
               <IonTitle>Create Location Alert</IonTitle>
               <IonButtons slot="end">
-                <IonButton onClick={() => setShowModal(false)}>
+                <IonButton onClick={handleExplicitClose}>
                   <IonIcon icon={closeOutline} />
                 </IonButton>
               </IonButtons>

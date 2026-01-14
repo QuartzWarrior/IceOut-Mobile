@@ -186,8 +186,16 @@ export const IceOutApi = {
     // Convert subscription to JSON format
     const subJson = subscription.toJSON();
 
-    // Generate unique ID for this alert rule
-    const alertId = crypto.randomUUID();
+    let alertId: string;
+    try {
+      alertId = crypto.randomUUID();
+    } catch {
+      alertId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        const r = Math.random() * 16 | 0;
+        const v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+      });
+    }
     console.log('Alert ID:', alertId);
 
     // Build payload matching the backend API format

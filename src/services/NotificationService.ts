@@ -12,7 +12,11 @@ export class NotificationService {
     }
 
     if (Capacitor.isNativePlatform()) {
-      await this.initializeNative();
+      try {
+        await this.initializeNative();
+      } catch (error) {
+        console.warn('⚠️ Native push notifications unavailable:', error);
+      }
     } else {
       await this.initializeWeb();
     }
@@ -34,8 +38,6 @@ export class NotificationService {
         throw new Error('Push notification permission denied');
       }
 
-      await PushNotifications.register();
-
       await PushNotifications.addListener('registration', (token: Token) => {
         console.log('✅ Push registration success, token: ' + token.value);
         localStorage.setItem('fcm_token', token.value);
@@ -43,6 +45,7 @@ export class NotificationService {
 
       await PushNotifications.addListener('registrationError', (error) => {
         console.error('❌ Push registration error:', error);
+        localStorage.setItem('fcm_error', JSON.stringify(error));
       });
 
       await PushNotifications.addListener('pushNotificationReceived', (notification: PushNotificationSchema) => {
@@ -52,10 +55,71 @@ export class NotificationService {
       await PushNotifications.addListener('pushNotificationActionPerformed', (notification: ActionPerformed) => {
         console.log('👆 Push notification action performed:', notification);
       });
+
+      console.log('Registering for push notifications...');
+
+      try {
+        await PushNotifications.register();
+        await this.waitForFCMToken();
+      } catch (registerError: any) {
+        console.error('Push notification registration failed:', registerError);
+
+        localStorage.setItem('fcm_unavailable', 'true');
+
+        if (registerError?.code === 'FIREBASE_NOT_CONFIGURED' ||
+            registerError?.message?.includes('Firebase not configured')) {
+          console.warn('⚠️ Firebase not configured - push notifications will be unavailable');
+          return;
+        }
+
+        const errorStr = JSON.stringify(registerError);
+        if (errorStr.includes('FirebaseApp') || errorStr.includes('google-services')) {
+          console.warn('⚠️ Firebase not available - continuing without push notifications');
+          return;
+        }
+
+        console.warn('⚠️ Push registration error (continuing anyway):', registerError);
+        return;
+      }
+
     } catch (error) {
       console.error('Error initializing native push notifications:', error);
-      throw error;
+      localStorage.setItem('fcm_unavailable', 'true');
     }
+  }
+
+  private static async waitForFCMToken(maxWaitMs: number = 5000): Promise<void> {
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < maxWaitMs) {
+      const token = localStorage.getItem('fcm_token');
+      if (token) {
+        console.log('✅ FCM token ready:', token.substring(0, 20) + '...');
+        return;
+      }
+
+      const error = localStorage.getItem('fcm_error');
+      if (error) {
+        localStorage.removeItem('fcm_error');
+        console.error('FCM registration error detected:', error);
+
+        const errorStr = error.toLowerCase();
+
+        if (errorStr.includes('api key') || errorStr.includes('apikey')) {
+          throw new Error('Firebase not properly configured. Please set up a real Firebase project:\n\n1. Go to https://console.firebase.google.com/\n2. Create a project\n3. Add Android app (package: com.iceout.app)\n4. Download google-services.json\n5. Replace android/app/google-services.json\n6. Rebuild the app');
+        }
+
+        if (errorStr.includes('firebaseapp') || errorStr.includes('google-services')) {
+          throw new Error('Firebase not configured. To enable push notifications, add google-services.json from Firebase Console to android/app/ directory.');
+        }
+
+        throw new Error('FCM registration failed: ' + error);
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    throw new Error('Timeout waiting for FCM token. Firebase may not be properly configured.');
   }
 
   private static async initializeWeb(): Promise<void> {
@@ -106,6 +170,40 @@ export class NotificationService {
       return localStorage.getItem('fcm_token');
     }
     return null;
+  }
+
+  static createDummySubscription(): PushSubscription {
+    const deviceId = this.getOrCreateDeviceId();
+
+    return {
+      endpoint: `dummy://device/${deviceId}`,
+      expirationTime: null,
+      keys: {
+        p256dh: 'dummy-p256dh-key',
+        auth: 'dummy-auth-key'
+      },
+      toJSON: () => ({
+        endpoint: `dummy://device/${deviceId}`,
+        expirationTime: null,
+        keys: {
+          p256dh: 'dummy-p256dh-key',
+          auth: 'dummy-auth-key'
+        }
+      })
+    } as unknown as PushSubscription;
+  }
+
+  private static getOrCreateDeviceId(): string {
+    let deviceId = localStorage.getItem('device_id');
+    if (!deviceId) {
+      deviceId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        const r = Math.random() * 16 | 0;
+        const v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+      });
+      localStorage.setItem('device_id', deviceId);
+    }
+    return deviceId;
   }
 
 
