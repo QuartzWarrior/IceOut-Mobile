@@ -204,20 +204,23 @@ const Home: React.FC = () => {
 
       setStatus('✅ Alert activated!');
 
-      // Show success message
       setTimeout(() => {
         setShowModal(false);
         setAlertCenter(null);
-        setStatus('');
-      }, 1000);
+        setIsSubscribing(false);
+        setTimeout(() => setStatus(''), 500);
+      }, 1500);
 
     } catch (error: unknown) {
       console.error('❌ Subscription error:', error);
-      setStatus('❌ Failed to activate alert');
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      alert('Failed to set up notifications: ' + errorMessage);
-    } finally {
+      setStatus('❌ Failed: ' + errorMessage);
       setIsSubscribing(false);
+
+      setTimeout(() => {
+        alert('Failed to set up notifications: ' + errorMessage);
+        setStatus('');
+      }, 500);
     }
   };
 
@@ -356,7 +359,7 @@ const Home: React.FC = () => {
           isOpen={showModal}
           onDidDismiss={() => setShowModal(false)}
           initialBreakpoint={0.5}
-          breakpoints={[0, 0.5, 0.75]}
+          breakpoints={[0, 0.5, 0.75, 1.0]}
           style={{
             '--opacity': isAdjustingRadius ? '0.3' : '1',
             opacity: isAdjustingRadius ? 0.3 : 1,

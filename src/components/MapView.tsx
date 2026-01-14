@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, memo } from 'react';
+import { useEffect, useState, useMemo, memo, useCallback } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Circle, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -121,6 +121,107 @@ const MapView: React.FC<MapViewProps> = ({
   showModal = false
 }) => {
 
+  const getCategoryName = useCallback((categoryEnum?: number): string => {
+    const categories: { [key: number]: string } = {
+      0: 'Other',
+      1: 'Observation',
+      2: 'Active Incident',
+      3: 'Critical',
+      4: 'Arrest',
+    };
+    return categoryEnum !== undefined ? categories[categoryEnum] || 'Unknown' : 'Unknown';
+  }, []);
+
+  const getIcon = useCallback((report: Report) => {
+    const type = (report.report_type || '').toLowerCase();
+    const status = (report.status !== undefined ? report.status : -1);
+    const category = report.category_enum;
+
+    if (category === 4 || category === 3 || type.includes('arrest') || type.includes('critical') || status === 3) {
+      return Icons.critical;
+    }
+
+    if (category === 2 || type.includes('active') || status === 2) {
+      return Icons.active;
+    }
+
+    if (category === 1 || type.includes('observed') || type.includes('observation') || status === 1) {
+      return Icons.observed;
+    }
+
+    return Icons.other;
+  }, []);
+
+  const formatTime = useCallback((timeString: string) => {
+    try {
+      return new Date(timeString).toLocaleString();
+    } catch {
+      return timeString;
+    }
+  }, []);
+
+  const markers = useMemo(() => {
+    return reports.map((report, index) => {
+      let lat, lng;
+
+      if (report.location && report.location.coordinates && Array.isArray(report.location.coordinates)) {
+        // GeoJSON format: [longitude, latitude] (reversed!)
+        lng = report.location.coordinates[0];
+        lat = report.location.coordinates[1];
+      } else {
+        lat = report.latitude || report.lat;
+        lng = report.longitude || report.lng || report.lon;
+      }
+
+      if (!lat || !lng || typeof lat !== 'number' || typeof lng !== 'number') {
+        console.warn('Skipping report with invalid coordinates:', report);
+        return null;
+      }
+
+      return (
+        <Marker
+          key={report.id || index}
+          position={[lat, lng]}
+          icon={getIcon(report)}
+        >
+          <Popup maxWidth={300}>
+            <div style={{ fontFamily: 'Arial, sans-serif' }}>
+              <strong style={{ fontSize: '14px', color: '#333' }}>
+                {report.report_type || getCategoryName(report.category_enum) || 'Unknown Report'}
+              </strong>
+              <br />
+              <small style={{ color: '#666' }}>
+                {report.incident_time ? formatTime(report.incident_time) : 'Time unknown'}
+              </small>
+              <br /><br />
+              <div style={{ maxHeight: '150px', overflowY: 'auto' }}>
+                {report.description || report.details || report.location_description || 'No description provided.'}
+              </div>
+              {report.location_description && (
+                <>
+                  <br />
+                  <small style={{ color: '#999' }}>
+                    📍 {report.location_description}
+                  </small>
+                </>
+              )}
+              {report.small_thumbnail && (
+                <>
+                  <br /><br />
+                  <img
+                    src={report.small_thumbnail}
+                    alt="Report thumbnail"
+                    style={{ width: '100%', borderRadius: '4px' }}
+                  />
+                </>
+              )}
+            </div>
+          </Popup>
+        </Marker>
+      );
+    });
+  }, [reports, getIcon, getCategoryName, formatTime]);
+
   // Memoize circles to prevent re-renders during zoom/pan
   const tempCircle = useMemo(() => {
     if (showModal && alertCenter && !activeAlert) {
@@ -157,49 +258,6 @@ const MapView: React.FC<MapViewProps> = ({
     }
     return null;
   }, [activeAlert]);
-
-  const getCategoryName = (categoryEnum?: number): string => {
-    const categories: { [key: number]: string } = {
-      0: 'Other',
-      1: 'Observation',
-      2: 'Active Incident',
-      3: 'Critical',
-      4: 'Arrest',
-    };
-    return categoryEnum !== undefined ? categories[categoryEnum] || 'Unknown' : 'Unknown';
-  };
-
-  const getIcon = (report: Report) => {
-    const type = (report.report_type || '').toLowerCase();
-    const status = (report.status !== undefined ? report.status : -1);
-    const category = report.category_enum;
-
-    // Critical/Red markers for arrests and critical incidents
-    if (category === 4 || category === 3 || type.includes('arrest') || type.includes('critical') || status === 3) {
-      return Icons.critical;
-    }
-
-    // Active/Orange markers for ongoing incidents
-    if (category === 2 || type.includes('active') || status === 2) {
-      return Icons.active;
-    }
-
-    // Observed/Green markers for reported observations
-    if (category === 1 || type.includes('observed') || type.includes('observation') || status === 1) {
-      return Icons.observed;
-    }
-
-    // Default blue for other types
-    return Icons.other;
-  };
-
-  const formatTime = (timeString: string) => {
-    try {
-      return new Date(timeString).toLocaleString();
-    } catch {
-      return timeString;
-    }
-  };
 
   const getMapCenter = (): [number, number] => {
     if (reports.length === 0) return [39.8283, -98.5795]; // Center of USA
@@ -246,6 +304,11 @@ const MapView: React.FC<MapViewProps> = ({
       zoom={getMapZoom()}
       style={{ height: '100%', width: '100%', zIndex: 1 }}
       scrollWheelZoom={true}
+      preferCanvas={true}
+      zoomControl={true}
+      fadeAnimation={true}
+      markerZoomAnimation={true}
+      zoomAnimation={true}
     >
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
@@ -254,6 +317,10 @@ const MapView: React.FC<MapViewProps> = ({
         maxZoom={19}
         minZoom={3}
         errorTileUrl=""
+        updateWhenZooming={false}
+        updateWhenIdle={true}
+        keepBuffer={2}
+        tileSize={256}
       />
 
       {/* User's location marker */}
@@ -268,72 +335,7 @@ const MapView: React.FC<MapViewProps> = ({
       {tempCircle}
       {activeCircle}
 
-      {/* Plot all report markers */}
-      {reports.map((report, index) => {
-        // Safety check: ensure valid coordinates exist
-        // Handle multiple coordinate formats:
-        // 1. Direct properties: report.latitude, report.longitude
-        // 2. Alternative names: report.lat, report.lng, report.lon
-        // 3. GeoJSON format: report.location.coordinates [lng, lat]
-
-        let lat, lng;
-
-        if (report.location && report.location.coordinates && Array.isArray(report.location.coordinates)) {
-          // GeoJSON format: [longitude, latitude] (reversed!)
-          lng = report.location.coordinates[0];
-          lat = report.location.coordinates[1];
-        } else {
-          lat = report.latitude || report.lat;
-          lng = report.longitude || report.lng || report.lon;
-        }
-
-        if (!lat || !lng || typeof lat !== 'number' || typeof lng !== 'number') {
-          console.warn('Skipping report with invalid coordinates:', report);
-          return null;
-        }
-
-        return (
-          <Marker
-            key={report.id || index}
-            position={[lat, lng]}
-            icon={getIcon(report)}
-          >
-            <Popup maxWidth={300}>
-              <div style={{ fontFamily: 'Arial, sans-serif' }}>
-                <strong style={{ fontSize: '14px', color: '#333' }}>
-                  {report.report_type || getCategoryName(report.category_enum) || 'Unknown Report'}
-                </strong>
-                <br />
-                <small style={{ color: '#666' }}>
-                  {report.incident_time ? formatTime(report.incident_time) : 'Time unknown'}
-                </small>
-                <br /><br />
-                <div style={{ maxHeight: '150px', overflowY: 'auto' }}>
-                  {report.description || report.details || report.location_description || 'No description provided.'}
-                </div>
-                {report.location_description && (
-                  <>
-                    <br />
-                    <small style={{ color: '#999' }}>
-                      📍 {report.location_description}
-                    </small>
-                  </>
-                )}
-                {report.small_thumbnail && (
-                  <>
-                    <br /><br />
-                    <img
-                      src={report.small_thumbnail}
-                      alt="Report thumbnail"
-                      style={{ width: '100%', borderRadius: '4px' }}
-                    />
-                  </>
-                )}
-              </div>
-            </Popup>
-          </Marker>
-        );
-      })}
+      {markers}
     </MapContainer>
   );
 };
