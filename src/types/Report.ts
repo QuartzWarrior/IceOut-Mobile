@@ -31,6 +31,9 @@ export interface Report {
   thumbnail?: string;
   image?: string;
 
+  // source of data
+  source?: string; // currently 'iceout.org' and 'stopice.net'
+
   [key: string]: unknown; // Allow additional properties from API
 }
 

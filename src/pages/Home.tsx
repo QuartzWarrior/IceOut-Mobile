@@ -130,6 +130,35 @@ const Home: React.FC = () => {
 
         setTimeout(() => setStatus(''), 3000);
 
+        setTimeout(async () => { // stopice data
+          try {
+            console.log('🔄 Loading additional reports from StopIce...');
+            setStatus('Loading additional reports...');
+
+            const stopIceReports = await IceOutApi.getStopIceReports();
+
+            if (stopIceReports.length > 0) {
+              const existingIds = new Set(points.map(r => r.id));
+              const newReports = stopIceReports.filter(r => !existingIds.has(r.id));
+
+              const combinedReports = [...points, ...newReports];
+
+              console.log(`✅ Added ${newReports.length} new reports from StopIce`);
+              console.log(`Total reports: ${combinedReports.length}`);
+
+              setReports(combinedReports);
+              localStorage.setItem('iceout_reports', JSON.stringify(combinedReports));
+
+              setStatus(`Loaded ${combinedReports.length} total reports`);
+              setTimeout(() => setStatus(''), 3000);
+            } else {
+              console.log('No additional reports from StopIce');
+            }
+          } catch (error) {
+            console.error('Failed to load StopIce data:', error);
+          }
+        }, 1000);
+
       } catch (e) {
         console.error('=== INITIALIZATION ERROR ===', e);
         setStatus('Error: ' + (e as Error).message);

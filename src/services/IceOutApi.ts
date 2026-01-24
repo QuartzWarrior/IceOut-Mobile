@@ -172,6 +172,69 @@ export const IceOutApi = {
     return decode(new Uint8Array(response.data));
   },
 
+  async getStopIceReports() {
+    console.log('Fetching StopIce reports...');
+
+    try {
+      const response = await axios.get('https://stopice.net/login/?recentmapdata=1&duration=since_yesterday', {
+        timeout: 60000,
+        headers: {
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        }
+      });
+
+      const xmlText = response.data;
+      const parser = new DOMParser();
+      const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
+
+      const mapDataElements = xmlDoc.getElementsByTagName('map_data');
+      const reports = [];
+
+      for (let i = 0; i < mapDataElements.length; i++) {
+        const element = mapDataElements[i];
+
+        const getId = (tag: string) => element.getElementsByTagName(tag)[0]?.textContent || '';
+
+        const lat = parseFloat(getId('lat'));
+        const lng = parseFloat(getId('long'));
+
+        if (isNaN(lat) || isNaN(lng)) continue;
+
+        const priority = getId('thispriority').toLowerCase();
+        let category_enum = 0; // Other
+        if (priority.includes('urgent') || priority.includes('confirmed')) {
+          category_enum = 3; // Critical
+        } else if (priority.includes('sighting')) {
+          category_enum = 2; // Active Incident
+        } else if (priority.includes('unconfirmed')) {
+          category_enum = 1; // Observation
+        }
+
+        const report = {
+          id: getId('id'),
+          latitude: lat,
+          longitude: lng,
+          report_type: getId('thispriority'),
+          description: getId('comments'),
+          location_description: getId('location'),
+          incident_time: getId('timestamp'),
+          category_enum: category_enum,
+          small_thumbnail: getId('media').split(',')[0] || undefined, // Take first media if multiple
+          source: 'stopice.net'
+        };
+
+        reports.push(report);
+      }
+
+      console.log(`✅ Loaded ${reports.length} StopIce reports`);
+      return reports;
+
+    } catch (error) {
+      console.error('❌ Failed to fetch StopIce reports:', error);
+      return [];
+    }
+  },
+
   /**
    * Subscribe to push notifications for alerts in a specific area
    * @param subscription - PushSubscription object from browser
