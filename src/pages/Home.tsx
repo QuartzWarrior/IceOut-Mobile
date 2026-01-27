@@ -540,7 +540,7 @@ const Home: React.FC = () => {
                       <h3 style={{ margin: '10px 0' }}>Location Selected ✓</h3>
                     </IonText>
                     <p style={{ margin: '5px 0', color: '#666' }}>
-                      Lat: {alertCenter[0].toFixed(4)}, Lng: {alertCenter[1].toFixed(4)}
+                      Lng: {alertCenter[0].toFixed(4)}, Lat: {alertCenter[1].toFixed(4)}
                     </p>
                     <IonButton
                       size="small"
