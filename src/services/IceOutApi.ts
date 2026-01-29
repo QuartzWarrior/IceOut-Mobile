@@ -176,8 +176,12 @@ export const IceOutApi = {
     console.log('Fetching StopIce reports...');
 
     try {
-      const response = await axios.get('https://stopice.net/login/?recentmapdata=1&duration=since_yesterday', {
-        timeout: 60000,
+      const url = Capacitor.isNativePlatform()
+        ? 'https://stopice.net/login/?recentmapdata=1&duration=since_yesterday'
+        : '/stopice/login/?recentmapdata=1&duration=since_yesterday';
+
+      const response = await axios.get(url, {
+        timeout: 120000,
         headers: {
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         }

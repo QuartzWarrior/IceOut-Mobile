@@ -6,13 +6,13 @@ Does this using many sources.
 ## 📱 Download
 
 ### Android
-Get the APK directly from our [Releases](/releases) page.
+Get the APK directly from our [Releases](../../releases) page.
 
 ### iOS
 **Coming Soon!** iOS version is currently in development. (when i get a mac)
 
 ### Web App
-coming soon
+Visit the live web version at [ice.quartzwarrior.xyz](https://ice.quartzwarrior.xyz).
 
 ## ✨ Features
 
